@@ -1,0 +1,421 @@
+# calculate_metrics.py
+import pandas as pd
+import requests
+import time
+import json
+import os
+import re
+import logging
+from rouge import Rouge
+from collections import defaultdict
+from datetime import datetime, timedelta
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+import hashlib
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Конфигурация
+from config import CONFIG
+
+# Путь к результатам
+os.makedirs(CONFIG["output"]["results_dir"], exist_ok=True)
+
+# Локальный путь для сохранения датасета
+LOCAL_DATASET_PATH = os.path.join(CONFIG["output"]["results_dir"], "dataset_cache.parquet")
+SAVE_INTERVAL = CONFIG.get("save_interval", 10)  # Сохранять каждые N текстов
+
+# Файлы вывода
+METRICS_FILE = CONFIG["output"]["metrics_file"]
+BACKUP_METRICS_FILE = CONFIG["output"]["backup_metrics_file"]
+FAILED_SUMMARIES_FILE = CONFIG["output"]["failed_summaries_file"]
+SUMMARIES_JSON = os.path.join(CONFIG["output"]["results_dir"], "summaries.json")
+
+ROUGE_METRIC = Rouge()
+
+def load_dataset():
+    """Загружает датасет с HuggingFace или использует локальную копию"""
+    if os.path.exists(LOCAL_DATASET_PATH):
+        logger.info(f"Используем локальный датасет: {LOCAL_DATASET_PATH}")
+        return pd.read_parquet(LOCAL_DATASET_PATH)
+
+    logger.info("Загружаем датасет с HuggingFace")
+    splits = {'train': 'train/train.parquet', 'test': 'test/test.parquet'}
+    df = pd.read_parquet(f"hf://datasets/{CONFIG['dataset']['name']}/{splits[CONFIG['dataset']['split']]}")
+    df = df[["text", "summary"]].dropna()
+
+    # Сохраняем локально
+    df.to_parquet(LOCAL_DATASET_PATH)
+    logger.info(f"Датасет сохранён локально: {LOCAL_DATASET_PATH}")
+
+    return df
+
+
+def preprocess_text(text):
+    """Очистка текста от шума"""
+    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'[^а-яА-Яa-zA-Z0-9\s.,!?:;]', '', text)
+    return text
+
+
+def get_model_summary(model_name, text):
+    """Получает пересказ от модели через Ollama"""
+    url = CONFIG["ollama_api_url"]
+
+    prompt = f"""
+Ты — эксперт по пересказу текстов. Твоя задача — игнорировать служебные строки вроде "Кратко суммаризируй" или "Какова основная идея", если они есть в начале текста.
+Внимательно прочитай основной текст и выдели ключевую информацию. Сформируй лаконичный пересказ, который сохраняет смысл и структуру оригинала. В ответе должен быть только пересказ основного текста.
+
+Основной текст:
+{text}
+
+Пересказ:
+""".strip()
+
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False
+    }
+
+    for attempt in range(2):  # 2 попытки
+        try:
+            start_time = time.time()
+            response = requests.post(url, json=payload, timeout=60)
+            elapsed = time.time() - start_time
+
+            if response.status_code == 200:
+                result = response.json()
+                summary = result.get("response", "").strip()
+                if summary:
+                    return summary, elapsed
+
+                logger.warning(f"Модель {model_name} вернула пустой ответ. Повтор...")
+            else:
+                logger.error(f"Ошибка у модели {model_name}: {response.status_code}")
+
+        except Exception as e:
+            logger.error(f"Исключение для {model_name}: {e}")
+
+    # Если все попытки неудачны — сохраняем провал
+    save_failed_example(model_name, text)
+    return "", float('inf')
+
+
+def calculate_metrics(original, summary, elapsed):
+    """Вычисляет метрики качества пересказа"""
+    # Гарантируем, что оба текста являются строками
+    if not isinstance(original, str) or not isinstance(summary, str):
+        return {
+            "rouge_1": 0,
+            "rouge_2": 0,
+            "rouge_l": 0,
+            "jaccard": 0,
+            "cosine": 0,
+            "compression": 0,
+            "time": round(elapsed, 2),
+            "avg_speed_per_token": 0.0
+        }
+
+    # Если один из текстов пустой — возвращаем нули
+    if not original.strip() or not summary.strip():
+        return {
+            "rouge_1": 0,
+            "rouge_2": 0,
+            "rouge_l": 0,
+            "jaccard": 0,
+            "cosine": 0,
+            "compression": 0,
+            "time": round(elapsed, 2),
+            "avg_speed_per_token": 0.0
+        }
+
+    # ROUGE
+    try:
+        rouge_scores = ROUGE_METRIC.get_scores(summary, original)[0]
+    except Exception as e:
+        logger.warning(f"Ошибка при подсчёте ROUGE: {e}")
+        rouge_scores = {"rouge-1": {"f": 0}, "rouge-2": {"f": 0}, "rouge-l": {"f": 0}}
+
+    # Compression Ratio
+    orig_tokens = len(original.split())
+    summ_tokens = len(summary.split())
+    comp_ratio = summ_tokens / orig_tokens if orig_tokens > 0 else 1
+
+    # Speed per token
+    speed_per_token = elapsed / orig_tokens if orig_tokens > 0 else 0
+
+    # Cosine Similarity
+    try:
+        tfidf_matrix = TfidfVectorizer().fit_transform([original, summary])
+        cosine_sim = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+    except:
+        cosine_sim = 0
+
+    # Jaccard
+    def jaccard(s1, s2):
+        set1, set2 = set(s1.split()), set(s2.split())
+        return len(set1 & set2) / len(set1 | set2) if set1 or set2 else 0
+
+    return {
+        "rouge_1": rouge_scores["rouge-1"]["f"],
+        "rouge_2": rouge_scores["rouge-2"]["f"],
+        "rouge_l": rouge_scores["rouge-l"]["f"],
+        "jaccard": jaccard(original, summary),
+        "cosine": cosine_sim,
+        "compression": comp_ratio,
+        "time": round(elapsed, 2),
+        "avg_speed_per_token": round(speed_per_token, 6)
+    }
+
+def benchmark_models(models, dataset, max_runtime):
+    """Основной тестировочный цикл"""
+    results = {model: {"metrics": [], "times": []} for model in models}
+    start_time = datetime.now()
+    total_texts = 0
+
+    logger.info(f"Начало тестирования в {start_time.strftime('%H:%M:%S')}")
+    logger.info(f"Максимальное время тестирования: {max_runtime.total_seconds() // 60} мин")
+
+    last_state = load_last_processed_index(dataset)
+    start_idx = last_state["last_index"] + 1 if last_state else 0
+    logger.info(f"Стартуем с текста #{start_idx}")
+
+    for idx, row in enumerate(dataset.itertuples(), start_idx):
+        current_time = datetime.now()
+        elapsed_minutes = (current_time - start_time).total_seconds() / 60
+        remaining_minutes = (max_runtime - (current_time - start_time)).total_seconds() / 60
+        if remaining_minutes < 0:
+            logger.info("Истекло время тестирования")
+            break
+
+        logger.info(f"[+] Прошло: {elapsed_minutes:.1f} мин | Осталось: {remaining_minutes:.1f} мин")
+
+        try:
+            original = preprocess_text(row.text)
+            reference = preprocess_text(row.summary)
+        except Exception as e:
+            logger.warning(f"Ошибка при обработке текста #{idx}: {e}")
+            continue
+
+        # Генерируем уникальный ID для текста
+        text_unique_id = hashlib.md5(original.encode()).hexdigest()
+
+        logger.info(f"\nОбработка текста #{idx}")
+        total_texts += 1
+
+        current_summaries = {
+            "text_id": text_unique_id,
+            "original": original,
+            "reference": reference,
+            "models": {}
+        }
+
+        for model in models:
+            if (datetime.now() - start_time).seconds > max_runtime.total_seconds():
+                break
+
+            logger.info(f"Модель: {model}")
+            summary, elapsed = get_model_summary(model, original)
+            summary = remove_think_tag(summary)
+
+            # Вычисляем метрики
+            metrics = calculate_metrics(reference, summary, elapsed)
+            metrics["text_id"] = text_unique_id
+            metrics["model"] = model
+            metrics["time"] = elapsed
+            results[model]["metrics"].append(metrics)
+            results[model]["times"].append(elapsed)
+
+            # Сохраняем пересказ модели
+            current_summaries["models"][model] = {
+                "generated": summary,
+                "time": elapsed
+            }
+
+        # Сохранение каждые N итераций
+        if idx % SAVE_INTERVAL == 0:
+            aggregated = aggregate_results(results)
+            save_metrics(aggregated, append=True)
+            save_backup_metrics(aggregated)
+            save_last_summaries(current_summaries)
+            save_last_processed_index(idx)
+            logger.info(f"[+] Сохранено после {idx} текстов")
+
+    # Агрегация результатов
+    logger.info("Агрегация результатов")
+    aggregated = aggregate_results(results)
+    save_metrics(aggregated, append=True)
+    save_backup_metrics(aggregated)
+    save_last_summaries(current_summaries)
+    save_last_processed_index(len(dataset))
+    logger.info("✅ Тестирование завершено успешно!")
+
+    return aggregated
+
+
+def aggregate_results(results):
+    """Агрегирует результаты по всем текстам"""
+    aggregated = {}
+
+    for model, data in results.items():
+        if not data["metrics"]:
+            continue
+
+        df = pd.DataFrame(data["metrics"])
+        avg_metrics = {
+            "time": df["time"].mean(),
+            "rouge_1": df.get("rouge_1", pd.Series([0])).mean(),
+            "rouge_2": df.get("rouge_2", pd.Series([0])).mean(),
+            "rouge_l": df.get("rouge_l", pd.Series([0])).mean(),
+            "jaccard": df.get("jaccard", pd.Series([0])).mean(),
+            "cosine": df.get("cosine", pd.Series([0])).mean(),
+            "compression": df.get("compression", pd.Series([0])).mean(),
+            "avg_speed_per_token": df.get("avg_speed_per_token", pd.Series([0])).mean()
+        }
+
+        # Берём количество обработанных текстов
+        processed_count = len(data["metrics"])
+
+        # Сохраняем последнее значение text_id для истории (если нужно)
+        last_text_id = data["metrics"][-1].get("text_id", None)
+
+        aggregated[model] = {
+            "total_processed": processed_count,
+            "last_text_id": last_text_id,
+            "avg_time": round(avg_metrics["time"], 2),
+            "rouge_1": round(avg_metrics["rouge_1"], 4),
+            "rouge_2": round(avg_metrics["rouge_2"], 4),
+            "rouge_l": round(avg_metrics["rouge_l"], 4),
+            "jaccard": round(avg_metrics["jaccard"], 4),
+            "cosine": round(avg_metrics["cosine"], 4),
+            "compression": round(avg_metrics["compression"], 4),
+            "avg_speed_per_token": round(avg_metrics["avg_speed_per_token"], 6),
+            "history": data["metrics"]  # ✅ Сохраняем все метрики как история
+        }
+
+    return aggregated
+
+
+def save_metrics(metrics, append=True):
+    """Сохраняет метрики в файл. Если append=True — дополняет существующие данные"""
+    if append and os.path.exists(METRICS_FILE):
+        try:
+            with open(METRICS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("Файл metrics.json повреждён или пустой. Создаётся новый.")
+            existing = {}
+    else:
+        existing = {}
+
+    for model_name, model_data in metrics.items():
+        history = model_data.get("history", [])
+        total_processed = model_data.get("total_processed", 0)
+
+        if model_name not in existing:
+            existing[model_name] = {
+                "total_processed": total_processed,
+                "last_update": datetime.now().isoformat(),
+                "history": history
+            }
+        else:
+            existing[model_name]["history"] += history
+            existing[model_name]["total_processed"] += total_processed
+            existing[model_name]["last_update"] = datetime.now().isoformat()
+
+    # Сохраняем обратно в файл
+    with open(METRICS_FILE, "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False, indent=2)
+
+    logger.info(f"Метрики сохранены в {METRICS_FILE}")
+
+
+def save_backup_metrics(metrics):
+    """Сохраняет резервную копию метрик"""
+    with open(BACKUP_METRICS_FILE, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+    logger.info(f"Резервная копия метрик сохранена в {BACKUP_METRICS_FILE}")
+
+def save_last_summaries(summaries_entry):
+    """Сохраняет последний пересказ в файл summaries.json в валидном формате"""
+    file_exists = os.path.exists(SUMMARIES_JSON)
+
+    with open(SUMMARIES_JSON, "a", encoding="utf-8") as f:
+        if not file_exists or os.path.getsize(SUMMARIES_JSON) == 0:
+            # Если файл пустой, начинаем массив
+            f.write("[\n")
+            json.dump(summaries_entry, f, ensure_ascii=False, indent=2)
+            f.write("\n]")
+        else:
+            # Убираем ] в конце, добавляем запятую и новый объект
+            f.seek(0, os.SEEK_END)
+            f.seek(f.tell() - 2)  # уходим перед '\n]'
+            f.truncate()
+
+            f.write(",\n")
+            json.dump(summaries_entry, f, ensure_ascii=False, indent=2)
+            f.write("\n]")
+
+    logger.info(f"Пересказ сохранён в {SUMMARIES_JSON}")
+
+
+def save_failed_example(model_name, original_text):
+    """Сохраняет провальные примеры"""
+    failed = {"model": model_name, "original": original_text}
+    with open(FAILED_SUMMARIES_FILE, "a", encoding="utf-8") as f:
+        json.dump(failed, f, ensure_ascii=False)
+        f.write("\n")
+
+
+def load_last_processed_index(dataset):
+    """Загружает индекс последнего обработанного текста"""
+    if not os.path.exists(METRICS_FILE):
+        return None
+
+    try:
+        with open(METRICS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if data and data.values():
+                processed = next(iter(data.values()))["processed_texts"]
+                return {"last_index": processed}
+    except json.JSONDecodeError as e:
+        logger.warning(f"Файл {METRICS_FILE} повреждён или пустой: {e}")
+    except Exception as e:
+        logger.warning(f"Не удалось загрузить прогресс: {e}")
+
+    return None
+
+
+def save_last_processed_index(index):
+    """Сохраняет индекс последнего обработанного текста"""
+    progress_path = os.path.join(CONFIG["output"]["results_dir"], "progress.json")
+    with open(progress_path, "w", encoding="utf-8") as f:
+        json.dump({"last_index": index}, f)
+
+
+def remove_think_tag(summary):
+    """Удаляет think-блоки из ответа модели"""
+    return re.sub(r"<think>.*?</think>\n+", "", summary, flags=re.DOTALL)
+
+
+def main():
+    try:
+        # Загрузка датасета
+        logger.info("Загрузка датасета...")
+        df = load_dataset()
+        logger.info(f"Загружено {len(df)} текстов")
+
+        # Тестирование моделей
+        logger.info("Начало тестирования моделей")
+        benchmark_models(CONFIG["models"], df, CONFIG["max_runtime"])
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка выполнения: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()

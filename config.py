@@ -10,7 +10,7 @@ CONFIG = {
         "gemma3:1b",
         "qwen3:1.7b"
     ],
-    "max_runtime": timedelta(minutes=180),  # Время тестирования
+    "max_runtime": timedelta(minutes=15),  # Время тестирования в минутах
     "dataset": {
         "name": "RussianNLP/Mixed-Summarization-Dataset",
         "split": "train"

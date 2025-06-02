@@ -66,8 +66,13 @@ def get_model_summary(model_name, text):
     url = CONFIG["ollama_api_url"]
 
     prompt = f"""
-Ты — эксперт по пересказу текстов. Твоя задача — игнорировать служебные строки вроде "Кратко суммаризируй" или "Какова основная идея", если они есть в начале текста.
-Внимательно прочитай основной текст и выдели ключевую информацию. Сформируй лаконичный пересказ, который сохраняет смысл и структуру оригинала. В ответе должен быть только пересказ основного текста.
+Ты — эксперт по ультра-краткому пересказу текстов. Твоя задача:
+1. Игнорировать служебные строки в начале текста (например, "Кратко суммаризируй" или "Какова основная идея")
+2. Создать максимально сжатый пересказ, выделив только самую важную информацию:
+   - Использовать минимум слов
+   - Исключить второстепенные детали
+   - Сфокусироваться только на ключевых фактах и идеях
+3. В ответе должен быть только пересказ, без пояснений и дополнительного текста.
 
 Основной текст:
 {text}
@@ -105,9 +110,8 @@ def get_model_summary(model_name, text):
     return "", float('inf')
 
 
-def calculate_metrics(original, summary, elapsed):
+def calculate_metrics(original, reference, summary, elapsed):
     """Вычисляет метрики качества пересказа"""
-    # Гарантируем, что оба текста являются строками
     if not isinstance(original, str) or not isinstance(summary, str):
         return {
             "rouge_1": 0,
@@ -116,11 +120,10 @@ def calculate_metrics(original, summary, elapsed):
             "jaccard": 0,
             "cosine": 0,
             "compression": 0,
-            "time": round(elapsed, 2),
-            "avg_speed_per_token": 0.0
+            "avg_speed_per_token": 0,
+            "time": round(elapsed, 2)
         }
 
-    # Если один из текстов пустой — возвращаем нули
     if not original.strip() or not summary.strip():
         return {
             "rouge_1": 0,
@@ -129,33 +132,33 @@ def calculate_metrics(original, summary, elapsed):
             "jaccard": 0,
             "cosine": 0,
             "compression": 0,
-            "time": round(elapsed, 2),
-            "avg_speed_per_token": 0.0
+            "avg_speed_per_token": 0,
+            "time": round(elapsed, 2)
         }
 
-    # ROUGE
+    # ROUGE: между пересказом модели и эталоном
     try:
-        rouge_scores = ROUGE_METRIC.get_scores(summary, original)[0]
+        rouge_scores = ROUGE_METRIC.get_scores(summary, reference)[0]
     except Exception as e:
         logger.warning(f"Ошибка при подсчёте ROUGE: {e}")
         rouge_scores = {"rouge-1": {"f": 0}, "rouge-2": {"f": 0}, "rouge-l": {"f": 0}}
 
-    # Compression Ratio
+    # Compression Ratio: между пересказом и оригиналом
     orig_tokens = len(original.split())
     summ_tokens = len(summary.split())
     comp_ratio = summ_tokens / orig_tokens if orig_tokens > 0 else 1
 
-    # Speed per token
+    # Speed per Token: между временем и оригиналом
     speed_per_token = elapsed / orig_tokens if orig_tokens > 0 else 0
 
-    # Cosine Similarity
+    # Cosine Similarity: между пересказом модели и эталоном
     try:
-        tfidf_matrix = TfidfVectorizer().fit_transform([original, summary])
+        tfidf_matrix = TfidfVectorizer().fit_transform([reference, summary])
         cosine_sim = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
     except:
         cosine_sim = 0
 
-    # Jaccard
+    # Jaccard Similarity: между пересказом модели и эталоном
     def jaccard(s1, s2):
         set1, set2 = set(s1.split()), set(s2.split())
         return len(set1 & set2) / len(set1 | set2) if set1 or set2 else 0
@@ -164,11 +167,11 @@ def calculate_metrics(original, summary, elapsed):
         "rouge_1": rouge_scores["rouge-1"]["f"],
         "rouge_2": rouge_scores["rouge-2"]["f"],
         "rouge_l": rouge_scores["rouge-l"]["f"],
-        "jaccard": jaccard(original, summary),
+        "jaccard": jaccard(reference, summary),
         "cosine": cosine_sim,
-        "compression": comp_ratio,
-        "time": round(elapsed, 2),
-        "avg_speed_per_token": round(speed_per_token, 6)
+        "compression": comp_ratio,  # ← Теперь на основе оригинального текста
+        "avg_speed_per_token": speed_per_token,  # ← На основе оригинального текста
+        "time": round(elapsed, 2)
     }
 
 def benchmark_models(models, dataset, max_runtime):
@@ -183,6 +186,7 @@ def benchmark_models(models, dataset, max_runtime):
     last_state = load_last_processed_index(dataset)
     start_idx = last_state["last_index"] + 1 if last_state else 0
     logger.info(f"Стартуем с текста #{start_idx}")
+    current_summaries = {}
 
     for idx, row in enumerate(dataset.itertuples(), start_idx):
         current_time = datetime.now()
@@ -220,10 +224,14 @@ def benchmark_models(models, dataset, max_runtime):
 
             logger.info(f"Модель: {model}")
             summary, elapsed = get_model_summary(model, original)
+            # Пропускаем итерацию, если получили пустую строку
+            if not summary.strip():
+                continue
+
             summary = remove_think_tag(summary)
 
             # Вычисляем метрики
-            metrics = calculate_metrics(reference, summary, elapsed)
+            metrics = calculate_metrics(original, reference, summary, elapsed)
             metrics["text_id"] = text_unique_id
             metrics["model"] = model
             metrics["time"] = elapsed
@@ -235,6 +243,8 @@ def benchmark_models(models, dataset, max_runtime):
                 "generated": summary,
                 "time": elapsed
             }
+
+            logger.info(f"Время: {elapsed:.2f} сек. Метрики: {metrics}")
 
         # Сохранение каждые N итераций
         if idx % SAVE_INTERVAL == 0:

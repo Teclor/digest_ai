@@ -69,10 +69,10 @@ def load_metrics_history():
 
 def plot_comparison(data):
     fig, axes = plt.subplots(2, 4, figsize=(20, 10))
-    models = list(data.keys())
 
-    # Подсчитываем общее число обработанных текстов
-    total_texts = max(model.get("processed_texts", 0) for model in data.values())
+    # Подсчитываем общее число уникальных текстов (берём у самой "продвинутой" модели)
+    total_texts = max(model_data.get("processed_texts", 0) for model_data in data.values()) if data else 0
+
     logger.info(f"Всего обработано текстов: {total_texts}")
 
     metrics_to_plot = ['rouge_1', 'rouge_2', 'rouge_l', 'jaccard', 'cosine', 'avg_time', 'avg_speed_per_token', 'compression']
@@ -95,7 +95,6 @@ def plot_comparison(data):
         ax.tick_params(axis='x', rotation=45)
 
     plt.tight_layout()
-
     PLOT_OUTPUT_PATH = os.path.join(RESULTS_DIR, f"comparison_n{total_texts}_{datetime.now().strftime('%d_%H%M')}.png")
     plt.savefig(PLOT_OUTPUT_PATH, bbox_inches='tight')
     logger.info(f"График сохранён в {PLOT_OUTPUT_PATH}")

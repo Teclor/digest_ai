@@ -1,3 +1,4 @@
 .idea
 *.parquet
 *.json
+!/fine_tuning/*.json

@@ -66,19 +66,23 @@ def get_model_summary(model_name, text):
     url = CONFIG["ollama_api_url"]
 
     prompt = f"""
-Ты — эксперт по экстремально сжатому пересказу текстов. Твоя задача:
-1. Игнорировать служебные строки в начале текста (например, "Кратко суммаризируй" или "Какова основная идея")
+Ты — эксперт по пересказу текстов. Твоя задача:
+1. Игнорировать служебные строки в начале текста (например: "Кратко суммаризируй", "Какова основная идея" и т.п.).
 2. Создать предельно краткий пересказ, который:
-   - Передаёт ТОЛЬКО самую суть, без которой текст теряет смысл
-   - Использует минимально возможное количество слов
-   - Может быть как одним словом, так и несколькими предложениями (если суть невозможно передать короче)
-   - Исключает любые детали, которые не меняют основной смысл
-3. При создании пересказа:
-   - Постоянно спрашивай себя: "Можно ли убрать это слово без потери сути?"
-   - Если убрать деталь и смысл не изменится — убирай
-   - Используй самые ёмкие слова и конструкции
-4. В ответе должен быть только пересказ, без пояснений
-5. Пересказ должен быть на русском языке
+   - Сохраняет полную смысловую нагрузку оригинала (что происходит, кто участвует, зачем, как, к чему это приводит).
+   - Исключает любые детали, не влияющие на суть (даты, названия, повторяющиеся слова).
+   - Использует минимальное количество слов, но не менее 5 слов (даже если текст очень короткий). Но можешь сохранить ключевые термины из оригинала, если это помогает точности пересказа.
+   - Избегает механического повторения целых предложений.
+   - Структурирует информацию: 
+     - Кто? Что? Как? Зачем? К чему приводит?
+     - Если текст описывает процесс — сохрани логическую цепочку действий.
+     - Если текст описывает проблему — выдели её суть и возможные решения.
+3. Проверь пересказ:
+   - Можно ли убрать слово без потери смысла? → Убирай.
+   - Можно ли заменить на более ёмкий термин? → Заменяй.
+   - Есть ли повторы? → Упрощай.
+4. Ответ должен содержать только пересказ, без объяснений, форматирования, маркированных списков.
+5. Пересказ должен быть на русском языке.
 
 Основной текст:
 {text}
@@ -89,7 +93,7 @@ def get_model_summary(model_name, text):
     payload = {
         "model": model_name,
         "prompt": prompt,
-        "stream": False
+        "stream": False,
     }
 
     for attempt in range(2):  # 2 попытки
@@ -198,6 +202,7 @@ def benchmark_models(models, dataset, max_runtime):
         current_time = datetime.now()
         elapsed_minutes = (current_time - start_time).total_seconds() / 60
         remaining_minutes = (max_runtime - (current_time - start_time)).total_seconds() / 60
+
         if remaining_minutes < 0:
             logger.info("Истекло время тестирования")
             break
@@ -230,8 +235,9 @@ def benchmark_models(models, dataset, max_runtime):
 
             logger.info(f"Модель: {model}")
             summary, elapsed = get_model_summary(model, original)
-            # Пропускаем итерацию, если получили пустую строку
+
             if not summary.strip():
+                logger.warning(f"Модель {model} вернула пустой пересказ. Пропускаем...")
                 continue
 
             summary = remove_think_tag(summary)
@@ -253,7 +259,7 @@ def benchmark_models(models, dataset, max_runtime):
             logger.info(f"Время: {elapsed:.2f} сек. Метрики: {metrics}")
 
         # Сохранение каждые N итераций
-        if idx % SAVE_INTERVAL == 0:
+        if idx % SAVE_INTERVAL == 0 and idx != 0:
             aggregated = aggregate_results(results)
             save_metrics(aggregated, append=True)
             save_backup_metrics(aggregated)
@@ -317,30 +323,33 @@ def aggregate_results(results):
 
 
 def save_metrics(metrics, append=True):
-    """Сохраняет метрики в файл. Если append=True — дополняет существующие данные"""
+    """Сохраняет метрики в файл. Если append=True — дополняет только новые данные"""
+    existing = {}  # <-- Объявляем заранее
+
     if append and os.path.exists(METRICS_FILE):
         try:
             with open(METRICS_FILE, "r", encoding="utf-8") as f:
                 existing = json.load(f)
-        except json.JSONDecodeError:
-            logger.warning("Файл metrics.json повреждён или пустой. Создаётся новый.")
-            existing = {}
-    else:
-        existing = {}
+        except (json.JSONDecodeError, FileNotFoundError):
+            logger.warning("Файл metrics.json повреждён или отсутствует. Создаётся новый.")
 
+    # Для каждой модели проверяем, есть ли уже этот text_id в истории
     for model_name, model_data in metrics.items():
-        history = model_data.get("history", [])
-        total_processed = model_data.get("total_processed", 0)
+        history_to_add = model_data.get("history", [])
 
         if model_name not in existing:
             existing[model_name] = {
-                "total_processed": total_processed,
+                "total_processed": len(history_to_add),
                 "last_update": datetime.now().isoformat(),
-                "history": history
+                "history": history_to_add
             }
         else:
-            existing[model_name]["history"] += history
-            existing[model_name]["total_processed"] += total_processed
+            existing_ids = {entry["text_id"] for entry in existing[model_name].get("history", [])}
+            new_history = [entry for entry in history_to_add if entry.get("text_id") not in existing_ids]
+
+            # Обновляем историю и количество
+            existing[model_name]["history"] = existing[model_name].get("history", []) + new_history
+            existing[model_name]["total_processed"] = len(existing[model_name]["history"])
             existing[model_name]["last_update"] = datetime.now().isoformat()
 
     # Сохраняем обратно в файл

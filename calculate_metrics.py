@@ -90,7 +90,7 @@ def get_model_summary(model_name, text):
 """.strip()
     }
 
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             start_time = time.time()
             response = requests.post(url, json=payload, timeout=60)
@@ -106,25 +106,25 @@ def get_model_summary(model_name, text):
                 logger.error(f"Ошибка у модели {model_name}: {response.status_code}")
                 if response.status_code >= 500:
                     logger.info("Сервис недоступен. Ожидание... Нажмите Enter для повторной попытки.")
-                    #input()  # Пауза до нажатия
+                    input()  # Пауза до нажатия
                 continue
 
         except requests.exceptions.Timeout as e:
             logger.warning(f"Таймаут у модели {model_name}.")
             logger.info("Нажмите Enter для повторной попытки")
-            #input()
+            input()
             continue
 
         except requests.exceptions.ConnectionError as e:
             logger.error(f"Нет подключения к сервису {model_name}. Проверьте ollama и сеть")
             logger.info("Ожидание... Нажмите Enter для продолжения")
-            #input()  # Ждём нажатия
+            input()  # Ждём нажатия
             continue
 
         except Exception as e:
             logger.error(f"Неизвестная ошибка у модели {model_name}: {e}")
             logger.info("Нажмите Enter для повторной попытки")
-            #input()
+            input()
             continue
 
     # Если все попытки неудачны — сохраняем провал

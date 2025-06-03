@@ -5,12 +5,13 @@ CONFIG = {
     "models": [
         # "qwen3:8b",
         # "qwen3:4b",
-        "gemma3:4b-it-qat",
+        # "gemma3:4b-it-qat",
         # "gemma3:4b",
         "gemma3:1b",
+        "gemma3:1b-it-qat"
         # "qwen3:1.7b"
     ],
-    "max_runtime": timedelta(minutes=150),  # Время тестирования в минутах
+    "max_runtime": timedelta(minutes=10),  # Время тестирования в минутах
     "dataset": {
         "name": "RussianNLP/Mixed-Summarization-Dataset",
         "split": "train"

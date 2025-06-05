@@ -2,3 +2,7 @@
 *.parquet
 *.json
 !/fine_tuning/*.json
+!package.json
+node_modules
+logs
+llama.cpp

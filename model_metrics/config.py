@@ -7,11 +7,12 @@ CONFIG = {
         # "qwen3:4b",
         # "gemma3:4b-it-qat",
         # "gemma3:4b",
-        "gemma3:1b",
-        "gemma3:1b-it-qat"
+        # "gemma3:1b",
+        "gemma3:1b-it-qat",
+        # "yandex/YandexGPT-5-Lite-8B-instruct-GGUF"
         # "qwen3:1.7b"
     ],
-    "max_runtime": timedelta(minutes=10),  # Время тестирования в минутах
+    "max_runtime": timedelta(minutes=20),  # Время тестирования в минутах
     "dataset": {
         "name": "RussianNLP/Mixed-Summarization-Dataset",
         "split": "train"
@@ -22,6 +23,6 @@ CONFIG = {
         "failed_summaries_file": "failed_summaries.json",
         "results_dir": "results"
     },
-    "save_interval": 20,  # Сохранять каждые N текстов
+    "save_interval": 5,  # Сохранять каждые N текстов
     "ollama_api_url": "http://localhost:7869/api/generate"
 }

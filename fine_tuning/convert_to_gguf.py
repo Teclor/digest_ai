@@ -5,16 +5,16 @@ import subprocess
 def convert_model(model_dir, output_name):
     print("🚀 Начинаем конвертацию модели в GGUF...")
 
-    convert_script = os.path.join("llama.cpp", "convert.py")
+    convert_script = os.path.join("llama.cpp", "convert_hf_to_gguf.py")
     if not os.path.isfile(convert_script):
-        raise FileNotFoundError("Не найден convert.py из llama.cpp. Убедись, что ты клонировал репозиторий.")
+        raise FileNotFoundError("Не найден convert_hf_to_gguf.py из llama.cpp. Убедись, что ты клонировал репозиторий.")
 
     cmd = [
         "python3", convert_script,
+        model_dir,  # позиционный аргумент вместо --model_path и т.п.
         "--outfile", output_name,
-        "--tokenizer_path", model_dir,
-        "--model_path", model_dir,
-        "--model_type", "gemma"
+        "--outtype", "f16",  # или q8_0, если хочешь квантовать
+        "--verbose"
     ]
 
     print(f"🛠 Команда запуска: {' '.join(cmd)}")

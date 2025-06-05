@@ -7,7 +7,9 @@ os.environ["NUMEXPR_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 os.environ["TF_NUM_INTRAOP_THREADS"] = "4"
 os.environ["TF_NUM_INTEROP_THREADS"] = "4"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+import torch
 import pandas as pd
 from datasets import Dataset
 from transformers import (
@@ -20,12 +22,14 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM
 from datasets import load_from_disk
+from transformers import DataCollatorForSeq2Seq
+
+torch.cuda.empty_cache()
 
 # === Параметры ===
 MODEL_NAME = "unsloth/gemma-3-1b-it-qat"
 OUTPUT_DIR = "output"
 MAX_SOURCE_LENGTH = 512
-MAX_TARGET_LENGTH = 128
 
 # === Загрузка датасета ===
 train_df = pd.read_parquet("resources/summarization_ds_train.parquet")
@@ -38,22 +42,27 @@ test_dataset = Dataset.from_pandas(test_df)
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
 tokenizer.pad_token = tokenizer.eos_token  # для корректной генерации
 
+
 def tokenize_function(examples):
-    # Токенизируем исходный текст
     model_inputs = tokenizer(
         examples["text"],
         max_length=MAX_SOURCE_LENGTH,
         padding="max_length",
         truncation=True,
     )
-    # Токенизируем summary
     labels = tokenizer(
         examples["summary"],
-        max_length=MAX_SOURCE_LENGTH,  # сделать одинаковую длину
+        max_length=MAX_SOURCE_LENGTH,
         padding="max_length",
         truncation=True,
-    )
-    model_inputs["labels"] = labels["input_ids"]
+    )["input_ids"]
+
+    # Заменить паддинги на -100 для игнорирования в лоссе
+    labels = [
+        [(token if token != tokenizer.pad_token_id else -100) for token in label]
+        for label in labels
+    ]
+    model_inputs["labels"] = labels
     return model_inputs
 
 TOKENIZED_DIR = "resources/tokenized_data"
@@ -83,9 +92,12 @@ bnb_config = BitsAndBytesConfig(
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     quantization_config=bnb_config,
-    device_map="auto",
     trust_remote_code=True,
     attn_implementation="eager",  # рекомендация от Gemma
+    device_map="auto",  # авто распределение по устройствам
+    offload_folder="offload",  # папка для временного хранения параметров на диске
+    offload_state_dict=True,  # offload параметров
+    torch_dtype=torch.float16,
 )
 
 model.config.use_cache = False  # обязательно при checkpointing
@@ -110,34 +122,37 @@ model = get_peft_model(model, peft_config)
 # === Аргументы обучения ===
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
-    eval_strategy="epoch",
-    save_strategy="epoch",
-    learning_rate=2e-4,
-    num_train_epochs=2,
-    per_device_train_batch_size=1,
-    per_device_eval_batch_size=4,
+    num_train_epochs=3,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
     gradient_accumulation_steps=4,
+    eval_steps=25,
+    save_steps=25,
+    warmup_ratio=0.1,
+    learning_rate=5e-7,
+    max_steps=-1,
     fp16=True,
     logging_dir="logs",
     logging_strategy="steps",
-    logging_steps=500,
+    logging_steps=10,
     save_total_limit=2,
+    eval_strategy="steps",
+    save_strategy="steps",
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
     greater_is_better=False,
     report_to=["tensorboard"],
     dataloader_num_workers=2,
-    dataloader_prefetch_factor=2,
     label_names=["labels"],
 )
-
+data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, label_pad_token_id=-100)
 # === Тренер ===
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=tokenized_train,
     eval_dataset=tokenized_test,
-    data_collator=DataCollatorForSeq2Seq(tokenizer, model=model, padding=True),
+    data_collator=data_collator
 )
 
 # === Запуск обучения ===

@@ -2,14 +2,14 @@
   <div class="topic-selector">
     <!-- Выбор топика -->
     <div class="form-group">
-      <label>Выберите топик:</label>
+      <label>Выберите чат:</label>
       <select
         :value="modelValue"
         @input="$emit('update:modelValue', $event.target.value)"
         class="input-field"
       >
-        <option v-for="topic in topics" :key="topic" :value="topic">
-          {{ topic }}
+        <option v-for="topic in topics" :key="topic.name" :value="topic.name">
+          {{ topic.display_name }}
         </option>
       </select>
     </div>

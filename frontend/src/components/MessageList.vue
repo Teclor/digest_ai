@@ -14,17 +14,26 @@
 
     <!-- Список сообщений -->
     <div v-if="messages.length > 0" class="message-list">
-      <div v-for="(msg, idx) in messages" :key="idx" class="message-card">
+      <div
+          v-for="(msg, idx) in messages"
+          :key="idx"
+          class="message-card"
+          @click="selectMessage(msg.data.text)"
+      >
         <pre class="message-text">{{ msg.data.text }}</pre>
       </div>
     </div>
 
     <!-- Сообщение при пустом списке -->
     <div v-else class="empty-state">
-      📬 Нет сообщений. Нажмите "Загрузить", чтобы получить последние данные.
+      Нет сообщений. Нажмите "Загрузить", чтобы получить последние данные.
     </div>
 
-    <SummaryBlock :messages="messages" :selectedTopic="selectedTopic" />
+    <SummaryBlock
+        :messages="messages"
+        :selectedTopic="selectedTopic"
+        :selectedMessage="selectedMessage"
+    />
   </div>
 </template>
 
@@ -37,11 +46,16 @@ export default {
     TopicSelector,
     SummaryBlock
   },
-  props: ['topics', 'selectedTopic', 'limit', 'messages'],
+  props: ['topics', 'selectedTopic', 'limit', 'messages', 'selectedMessage'],
   methods: {
     onLoadMessages(data) {
       const payload = data || {topic: this.selectedTopic, limit: this.limit}
       this.$emit('load-messages', payload)
+    },
+    selectMessage(text) {
+      if (this.selectedTopic.startsWith('news')) {
+        this.$emit('select-message', text)
+      }
     }
   }
 }

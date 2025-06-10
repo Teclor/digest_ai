@@ -1,7 +1,7 @@
 <template>
   <div class="mb-8">
     <h3 class="text-xl font-bold mb-3 text-white">JS-код для получения сообщений чата</h3>
-    <label class="block mb-2 text-gray-300">Скопируйте этот код:</label>
+    <label class="block mb-2 text-gray-300">Скопируйте этот код и вставьте в консоль:</label>
 
     <div class="relative">
       <textarea

@@ -1,4 +1,8 @@
+import os
 from pydantic import BaseModel
+import json
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "resources/config.json")
 
 class KafkaConfig(BaseModel):
     bootstrap_servers: str = "kafka:9092"
@@ -10,8 +14,14 @@ class KafkaConfig(BaseModel):
 
 
 class OllamaConfig(BaseModel):
-    host: str = "http://ollama:11434"
+    url: str = "http://ollama:11434/api/generate"
     default_model: str = "gemma3-1b-ftr-75k:latest"
+    model: str = "gemma3-1b-ftr-75k:latest"
+    models: list = [
+        "gemma3-1b-it-qat:latest",
+        "gemma3-1b-ftr-10k:latest",
+        "gemma3-1b-ftr-75k:latest"
+    ]
     default_tokenizer: str = "unsloth/gemma-3-1b-it-qat"
     timeout: int = 20  # seconds
     max_input_text_tokens: int = 512
@@ -21,4 +31,14 @@ class AppConfig(BaseModel):
     kafka: KafkaConfig = KafkaConfig()
     ollama: OllamaConfig = OllamaConfig()
 
-config = AppConfig()
+
+def load_config() -> AppConfig:
+    if not os.path.exists(CONFIG_PATH):
+        raise FileNotFoundError(f"Config file not found at {CONFIG_PATH}")
+
+    with open(CONFIG_PATH, "r") as f:
+        config_data = json.load(f)
+
+    return AppConfig(**config_data)
+
+config = load_config()

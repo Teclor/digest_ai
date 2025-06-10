@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional
 
@@ -32,7 +32,8 @@ app.add_middleware(
 logger_config = LoggerConfigurator("api.json", log_format="json")
 logger = logger_config.get_logger("API")
 
-@app.get("/api/topics", response_model=List[str])
+
+@app.get("/api/topics", response_model=List[Dict[str, str]])
 def get_topics():
     try:
         admin = KafkaAdminClient(
@@ -41,8 +42,12 @@ def get_topics():
         )
         all_topics = admin.list_topics()
         admin.close()
-        visible_topics = sorted([t for t in all_topics if t != "__consumer_offsets"])
-        return visible_topics
+        visible_topics = [t for t in all_topics if t != "__consumer_offsets"]
+
+        with open("resources/topic_map.json", "r") as file:
+            topic_map = json.load(file)
+
+        return [{"name": topic, "display_name": topic_map.get(topic, topic)} for topic in sorted(visible_topics)]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при получении топиков: {e}")
 
@@ -69,8 +74,8 @@ def get_summary(text: str = Body(...), topic: str = Body(...)):
 
     chat_name = ''
 
-    if os.path.exists("resources/chats/topic_map.json"):
-        with open("resources/chats/topic_map.json", "r") as f:
+    if os.path.exists("resources/topic_map.json"):
+        with open("resources/topic_map.json", "r") as f:
             topic_map = json.load(f)
             if topic in topic_map:
                 chat_name = topic_map[topic]
@@ -123,10 +128,74 @@ def init_messages(resource_dir: Optional[str] = Query(None)):
 summarizer_service = SummaryService()
 
 @app.post("/api/truncated")
-async def truncate_text(text: str = Body(..., description="Текст для обрезки")):
+async def truncate_text(request: Request):
     max_tokens = config.ollama.max_input_text_tokens
     try:
+        body = await request.json()
+        text = body.get("text", "")
         truncated_text = summarizer_service.limit_tokens(text, max_tokens)
         return truncated_text
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка при обрезке текста: {str(e)}")
+
+@app.post("/api/ollama/url")
+async def truncate_text(request: Request):
+    try:
+        body = await request.json()
+        url = body.get("url", "")
+        logger.info(f"old url: {config.ollama.url} new url: {url}")
+        if len(url) == 0:
+            return 'Не передано значение'
+        config.ollama.url = url
+        return {"url": config.ollama.url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при обрезке текста: {str(e)}")
+
+@app.get("/api/ollama/url")
+async def truncate_text():
+    return config.ollama.url
+
+@app.get("/api/ollama/models")
+async def get_ollama_models():
+    return {
+        "models": config.ollama.models,
+        "current_model": config.ollama.model,
+        "default_model": config.ollama.default_model
+    }
+
+@app.post("/api/ollama/model")
+async def set_ollama_model(request: Request):
+    try:
+        body = await request.json()
+        model = body.get("model", "").strip()
+        if not model:
+            raise HTTPException(status_code=400, detail="Модель не указана")
+
+        if model not in config.ollama.models:
+            raise HTTPException(status_code=400, detail="Модель не найдена в списке")
+
+        config.ollama.model = model
+        logger.info(f"Текущая модель Ollama изменена на: {model}")
+        return {
+            "status": "success",
+            "current_model": config.ollama.model
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при установке модели: {str(e)}")
+
+@app.get("/api/ollama/system")
+async def get_ollama_models():
+    return {
+        "models": config.ollama.models,
+        "current_model": config.ollama.model,
+        "default_model": config.ollama.default_model
+    }
+
+@app.get("/api/ollama/system")
+async def get_ollama_models():
+    return {
+        "models": config.ollama.models,
+        "current_model": config.ollama.model,
+        "default_model": config.ollama.default_model
+    }

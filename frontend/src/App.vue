@@ -2,7 +2,7 @@
   <div id="app">
     <header class="app-header">
       <div class="logo">
-        <div style="text-align: center;">
+        <div class="logo-text">
           <h1>TL;DЯ</h1>
           <p>Пересказ - это быстро</p>
         </div>
@@ -27,28 +27,30 @@ export default {
 
 <style lang="scss">
 .app-header {
-  background-color: #0d0d0d;
-  color: #4caf50;
-  padding: 1rem 2rem;
+  padding: 2rem;
   display: flex;
+  justify-content: center;
   align-items: center;
-  justify-content: flex-start;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  text-align: center;
 
   .logo {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    .logo-text {
+      h1 {
+        font-size: 3rem;
+        margin: 0;
+        font-weight: bold;
+        background: linear-gradient(45deg, #4caf50, #8e44ad, #3498db, #f1c40f);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        line-height: 1.2;
+      }
 
-    h1 {
-      font-size: 1.8rem;
-      margin: 0;
-      font-weight: bold;
-    }
-
-    .logo-icon {
-      font-size: 1.8rem;
-      color: #4caf50;
+      p {
+        font-size: 1.2rem;
+        color: #ccc;
+        margin-top: 0.5rem;
+      }
     }
   }
 }

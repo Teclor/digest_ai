@@ -1,5 +1,6 @@
 import requests
 from config import config
+from utils.logger_configurator import LoggerConfigurator
 from ollama.prompt_template_factory import PromptTemplateFactory
 from transformers import AutoTokenizer
 from typing import Optional
@@ -7,14 +8,14 @@ from typing import Optional
 class SummaryService:
     def __init__(
         self,
-        ollama_host: str = config.ollama.host,
-        model: str = config.ollama.default_model,
-        tokenizer_name: Optional[str] = None
+        ollama_host: str | None = None,
+        model: str | None = None,
+        tokenizer_name: str | None = None
     ):
-        self.ollama_host = ollama_host
-        self.model = model
-        self.tokenizer_name = tokenizer_name or config.ollama.default_tokenizer or model
-        self._tokenizer = None  # Ленивая инициализация
+        self.ollama_url = ollama_host or config.ollama.url
+        self.model = model or config.ollama.model
+        self.tokenizer_name = tokenizer_name or config.ollama.default_tokenizer or self.model
+        self._tokenizer = None
 
     @property
     def tokenizer(self):
@@ -50,14 +51,16 @@ class SummaryService:
 
         return limited_text
 
-    def summarize(self, text: str, template_type: str = "message") -> str:
+    def summarize(self, text: str, template_type: str = "message", need_template: bool = True) -> str:
+        logger_config = LoggerConfigurator("summary_service.json", log_format="json")
+        logger = logger_config.get_logger("summarize")
         """
         :param text: Текст для пересказа
         :param template_type: Тип текста (используется для выбора шаблона)
         :return: Пересказанный текст от модели
         """
-        prompt = PromptTemplateFactory.get_prompt(template_type).format(text=text)
-
+        prompt = PromptTemplateFactory.get_prompt(template_type).format(text=text) if need_template else text
+        logger.info(f"prompt {prompt}")
         payload = {
             "model": self.model,
             "prompt": prompt,
@@ -65,8 +68,9 @@ class SummaryService:
         }
 
         try:
+            logger.info(f"Host {self.ollama_url} model {self.model}")
             response = requests.post(
-                f"{self.ollama_host}/api/generate",
+                f"{self.ollama_url}",
                 json=payload,
                 timeout=config.ollama.timeout
             )

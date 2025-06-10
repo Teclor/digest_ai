@@ -1,10 +1,12 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 WORKDIR /app
 
-# Установка нужных утилит
-RUN apt update && \
-    apt install -y --no-install-recommends \
+RUN echo "deb http://mirror.yandex.ru/debian bookworm main" > /etc/apt/sources.list && \
+    echo "deb http://mirror.yandex.ru/debian bookworm-updates main" >> /etc/apt/sources.list && \
+    echo "deb http://mirror.yandex.ru/debian-security bookworm-security main" >> /etc/apt/sources.list && \
+    apt-get update -o Acquire::Retries=1 && \
+    apt-get install -y --no-install-recommends \
         iproute2 \
         iputils-ping \
         netcat-openbsd \
@@ -13,14 +15,13 @@ RUN apt update && \
         procps \
         curl \
         tcpdump && \
-    apt clean && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Копируем зависимости и устанавливаем Python-зависимости
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY wheel/*.whl /wheels/
+RUN pip install --no-index --find-links=/wheels/ /wheels/*.whl
 
-# Открываем порты
 EXPOSE 22
 EXPOSE 5000
 

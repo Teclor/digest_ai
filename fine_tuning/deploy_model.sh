@@ -4,8 +4,8 @@ set -euo pipefail
 if [ -e "./merged_model" ]; then
     sudo rm -rf "./merged_model"
 fi
-if [ -e "./gemma-1b-it.gguf" ]; then
-    sudo rm -rf "./gemma-1b-it.gguf"
+if [ -e "./gemma_tuned_remote_75k.gguf" ]; then
+    sudo rm -rf "./gemma_tuned_remote_75k.gguf"
 fi
 
 
@@ -15,8 +15,8 @@ python merge_model.py
 echo "=== Запуск конвертации в GGUF ==="
 python convert_to_gguf.py
 
-MERGED_GGUF="gemma-1b-it.gguf"
-OLLAMA_BLOBS_DIR="../../ollama-docker/ollama/ollama/models/gemma"
+MERGED_GGUF="gemma_tuned_remote_75k.gguf"
+OLLAMA_BLOBS_DIR="../../ollama-docker/ollama/ollama/models/gemma_75_remote"
 
 echo "=== Копирование GGUF модели в Ollama models ==="
 sudo mkdir -p "$OLLAMA_BLOBS_DIR"
@@ -29,9 +29,9 @@ sudo cp "$MERGED_GGUF" "$OLLAMA_BLOBS_DIR/"
 OLLAMA_CONTAINER_NAME="ollama"
 
 echo "=== Удаление старой модели в Ollama (если есть) ==="
-docker exec "$OLLAMA_CONTAINER_NAME" ollama rm gemma_tuned || true
+docker exec "$OLLAMA_CONTAINER_NAME" ollama rm gemma_tuned_remote_75k || true
 
 echo "=== Создание новой модели в Ollama ==="
-docker exec "$OLLAMA_CONTAINER_NAME" ollama create gemma_tuned -f /root/.ollama/models/Modelfile
+docker exec "$OLLAMA_CONTAINER_NAME" ollama create gemma_tuned_remote_75k -f /root/.ollama/models/gemma_75_remote/Modelfile
 
 echo "=== Готово ==="

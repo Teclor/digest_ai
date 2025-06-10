@@ -25,7 +25,7 @@ def convert_model(model_dir, output_name):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Конвертировать модель HuggingFace в GGUF формат для llama.cpp")
     parser.add_argument("--model_dir", type=str, default="merged_model", help="Путь до модели (merged PEFT)")
-    parser.add_argument("--output_name", type=str, default="gemma-1b-it.gguf", help="Имя выходного GGUF-файла")
+    parser.add_argument("--output_name", type=str, default="gemma_tuned_remote_75k.gguf", help="Имя выходного GGUF-файла")
 
     args = parser.parse_args()
     convert_model(args.model_dir, args.output_name)

@@ -3,7 +3,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 BASE_MODEL = "unsloth/gemma-3-1b-it-qat"
-PEFT_MODEL_PATH = "output"  # Папка, куда Trainer сохранял LoRA веса
+PEFT_MODEL_PATH = "output_remote"
 MERGED_MODEL_PATH = "merged_model"
 
 def merge_lora_and_save():

@@ -6,7 +6,7 @@ import random
 
 MAX_SOURCE_LENGTH = 512
 MODEL_NAME = "unsloth/gemma-3-1b-it-qat"
-SAMPLE_SIZE = 1000  # количество случайных примеров в итоговом датасете
+SAMPLE_SIZE = 75000  # количество случайных примеров в итоговом датасете
 
 def save_dataset_as_parquet():
     print("Загрузка датасета...")

@@ -1,6 +1,6 @@
-from kafka import KafkaAdminClient
-from kafka.admin import NewTopic
-from kafka.errors import UnknownTopicOrPartitionError, NodeNotReadyError, NoBrokersAvailable
+from messages import KafkaAdminClient
+from messages.admin import NewTopic
+from messages.errors import UnknownTopicOrPartitionError, NodeNotReadyError, NoBrokersAvailable
 import time
 
 BOOTSTRAP_SERVERS = "localhost:9092"

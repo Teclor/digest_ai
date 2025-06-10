@@ -1,0 +1,88 @@
+:root {
+  --gap: 2rem;
+  --max-width: 1200px;
+  --font-size-base: 18px;
+  --font-size-title: 24px;
+}
+
+html {
+  font-size: var(--font-size-base);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0d0d0d;
+  color: #e6e6e6;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.6;
+}
+
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 var(--gap);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  justify-content: center;
+  align-items: stretch;
+}
+
+.col {
+  flex: 1 1 calc(33% - var(--gap));
+  min-width: 300px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 960px) {
+  .col {
+    flex: 1 1 calc(50% - var(--gap));
+  }
+}
+
+@media (max-width: 600px) {
+  .col {
+    flex: 1 1 100%;
+  }
+}
+
+
+.tabs-wrapper {
+  max-width: 80%;
+  margin: 0 auto;
+  padding: 2rem 0;
+}
+
+.el-tabs.chat-tabs {
+  background-color: #121212 !important;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.el-tabs__header {
+  text-align: center !important;
+  background-color: #1a1a1a !important;
+  border-bottom: 1px solid #2a2a2a !important;
+  margin-bottom: 1.5rem !important;
+}
+
+.el-tabs__nav-wrap::after {
+  background-color: #2a2a2a !important;
+}
+
+.el-tabs__item {
+  color: #b3b3b3 !important;
+  font-size: 1.1rem !important;
+  padding: 0.75rem 1.5rem !important;
+  border-radius: 6px !important;
+}
+
+.el-tabs__item.is-active {
+  color: #4caf50 !important;
+  background-color: #1f1f1f !important;
+}

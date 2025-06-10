@@ -1,7 +1,8 @@
-
 networks:
   kafka-network:
     driver: bridge
+  ollama-docker:
+    name: ollama-docker
 
 services:
   zookeeper:
@@ -60,6 +61,7 @@ services:
       - ../summary:/app/
     networks:
       - kafka-network
+      - ollama-docker
     ports:
       - "5000:5000"
     depends_on:
